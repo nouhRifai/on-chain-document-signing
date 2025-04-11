@@ -65,7 +65,30 @@ mod hello_anchor {
         Ok(())
     }
     
-    pub fn delete_document(ctx: Context<DeleteDocument>) -> Result<()> {
+    pub fn delete_sub_signature(ctx: Context<DeleteSubSignature>) -> Result<()> {
+        let document = &mut ctx.accounts.document;
+        let prev_document = &mut ctx.accounts.prev_document;
+
+        // Ensure only the original signer can delete
+        require!(
+            document.signer == ctx.accounts.signer.key(),
+            ErrorCode::UnauthorizedRevocation
+        );
+        require!(
+            document.next_signature == Pubkey::default(),
+            ErrorCode::HasNextSignature
+        );
+        require!(
+            document.prev_signature != Pubkey::default(),
+            ErrorCode::HasNoPrevSignature
+        );
+
+        prev_document.next_signature = Pubkey::default();
+        msg!("Document signature deleted: {:?} by {:?}", document.key(), ctx.accounts.signer);
+        Ok(())
+    }
+    
+    pub fn delete_first_signature(ctx: Context<DeleteFirstSignature>) -> Result<()> {
         let document = &mut ctx.accounts.document;
 
         // Ensure only the original signer can delete
@@ -77,7 +100,11 @@ mod hello_anchor {
             document.next_signature == Pubkey::default(),
             ErrorCode::HasNextSignature
         );
-        msg!("Document deleted: {:?} by {:?}", document.key(), ctx.accounts.signer);
+        require!(
+            document.prev_signature == Pubkey::default(),
+            ErrorCode::HasPrevSignature
+        );
+        msg!("Document signature deleted: {:?} by {:?}", document.key(), ctx.accounts.signer);
         Ok(())
     }
 
@@ -144,7 +171,18 @@ pub struct RevokeSignature<'info> {
 }
 
 #[derive(Accounts)]
-pub struct DeleteDocument<'info> {
+pub struct DeleteSubSignature<'info> {
+    #[account(mut)]
+    pub signer: Signer<'info>,
+    #[account(mut)]
+    pub prev_document: Account<'info, Document>,
+    #[account(mut, close = signer)]
+    pub document: Account<'info, Document>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct DeleteFirstSignature<'info> {
     #[account(mut)]
     pub signer: Signer<'info>,
     #[account(mut, close = signer)]
@@ -160,4 +198,8 @@ pub enum ErrorCode {
     HashMismatch,
     #[msg("Other signatures must be revoked before you can revoke yours")]
     HasNextSignature,
+    #[msg("Invalid delete function. Try deleteFirstSignature")]
+    HasNoPrevSignature,
+    #[msg("Invalid delete function. Try deleteSubSignature")]
+    HasPrevSignature,
 }
